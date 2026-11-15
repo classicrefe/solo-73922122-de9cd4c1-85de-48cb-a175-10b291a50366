@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>水厂支管流量入仓前核查</title>
+<style>
+  :root { --line:#d0d7de; --ink:#1f2328; --muted:#57606a; }
+  * { box-sizing: border-box; }
+  body { font-family: "PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+         margin:0; background:#f6f8fa; color:var(--ink); }
+  main { max-width: 880px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; margin: 8px 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; font-size: 14px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:8px;
+          padding:18px 20px; margin-bottom:18px; }
+  .card h2 { font-size:16px; margin:0 0 12px; }
+  label { display:block; font-size:14px; font-weight:600; margin:12px 0 4px; }
+  input[type=text], textarea { width:100%; padding:8px 10px; font-size:14px;
+    border:1px solid var(--line); border-radius:6px; font-family:inherit; }
+  textarea { font-family: ui-monospace,Consolas,monospace; resize:vertical; }
+  .row { display:flex; gap:16px; flex-wrap:wrap; }
+  .row > div { flex:1; min-width:160px; }
+  button { margin-top:16px; padding:10px 28px; font-size:15px; font-weight:600;
+    color:#fff; background:#1f6feb; border:0; border-radius:6px; cursor:pointer; }
+  button:hover { background:#1a5fd0; }
+  .hint { font-size:13px; color:var(--muted); margin-top:6px; }
+  code { background:#eff1f3; padding:1px 5px; border-radius:4px; font-size:12.5px; }
+  .banner { border-radius:8px; padding:14px 18px; margin-bottom:18px; font-size:15px; }
+  .ok   { background:#dafbe1; border:1px solid #2da44e; }
+  .bad  { background:#fff8c5; border:1px solid #d4a72c; }
+  .err  { background:#ffebe9; border:1px solid #cf222e; }
+  .banner b { display:block; margin-bottom:4px; }
+  table { border-collapse:collapse; width:100%; margin-top:10px; font-size:14px; }
+  th, td { border:1px solid var(--line); padding:7px 10px; text-align:center; }
+  th { background:#f6f8fa; }
+  td.v { font-weight:700; color:#1a7f37; }
+  ul { margin:6px 0 0; padding-left:20px; font-size:13.5px; color:var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>水厂支管流量入仓前核查</h1>
+  <p class="sub">上传当日支管流量计 CSV，检验仪表给出的流量区间能否同时满足管网守恒；可行则给出一组逐段整数读数供复核。</p>
+
+  {% if error %}
+  <div class="banner err"><b>⚠ 输入错误</b>{{ error }}</div>
+  {% endif %}
+
+  {% if result %}
+    {% if result.feasible %}
+    <div class="banner ok"><b>✔ 整网可行</b>{{ result.message }}</div>
+    <div class="card">
+      <h2>逐段建议读数（整数）</h2>
+      <table>
+        <tr><th>管段编号</th><th>起点</th><th>终点</th><th>允许区间</th><th>建议读数</th></tr>
+        {% for f in result.flows %}
+        <tr>
+          <td>{{ f.id }}</td><td>{{ f.start }}</td><td>{{ f.end }}</td>
+          <td>[{{ f.lower }}, {{ f.upper }}]</td>
+          <td class="v">{{ f.value }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+      <p class="hint">进水点「{{ source }}」总供水量：<b>{{ result.total_supply }}</b>（内部节点流入量均等于流出量）。</p>
+    </div>
+    {% else %}
+    <div class="banner bad"><b>✖ 无可行分配 —— 该批待复核</b>{{ result.message }}</div>
+    {% endif %}
+  {% endif %}
+
+  <div class="card">
+    <h2>1. 提交 CSV</h2>
+    <form method="post" action="/check" enctype="multipart/form-data">
+      <label for="file">上传 CSV 文件</label>
+      <input type="file" id="file" name="file" accept=".csv,text/csv,text/plain">
+      <p class="hint">或直接粘贴 CSV 文本（文件优先）：</p>
+      <textarea name="pasted" rows="6" placeholder="管段编号,起点,终点,流量下限,流量上限&#10;P1,S,A,0,10&#10;P2,S,B,2,5">{{ pasted or "" }}</textarea>
+
+      <div class="row">
+        <div>
+          <label for="source">进水点（源节点）</label>
+          <input type="text" id="source" name="source" required value="{{ source or '' }}" placeholder="如 S">
+        </div>
+        <div>
+          <label for="sink">出水点（汇节点）</label>
+          <input type="text" id="sink" name="sink" required value="{{ sink or '' }}" placeholder="如 T">
+        </div>
+      </div>
+      <button type="submit">核查可行性</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>2. 数据要求</h2>
+    <ul>
+      <li>每行一条管段：<code>管段编号,起点,终点,流量下限,流量上限</code>；首行可带表头（中英文列名均可），<a href="/sample.csv">下载示例 CSV</a>。</li>
+      <li>上下界为非负整数，且下限 ≤ 上限。</li>
+      <li>节点 2～8 个，管段不超过 12 条。</li>
+      <li>管段须组成从进水点到出水点的有向无环网络，所有节点都在进水点到出水点的通路上。</li>
+      <li>内部节点流入量 = 流出量；每段读数落在自身闭区间内。</li>
+    </ul>
+  </div>
+</main>
+</body>
+</html>
